@@ -12,19 +12,19 @@ class TrackingSession(Base):
     __tablename__ = 'tracking_sessions'
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    sender_phone = Column(String(20), nullable=False)
+    sender_phone = Column(String(20), nullable=True)  # Changed to nullable
     recipient_phone = Column(String(20), nullable=False)
     message = Column(Text, nullable=True)
     status = Column(String(20), default='pending')
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    expires_at = Column(DateTime)
+    expires_at = Column(DateTime, default=lambda: datetime.now(timezone.utc) + timedelta(hours=24))
     
     locations = relationship("LocationUpdate", back_populates="session", cascade="all, delete-orphan")
 
 class LocationUpdate(Base):
     __tablename__ = 'location_updates'
     
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String(36), ForeignKey('tracking_sessions.id'), nullable=False)
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
@@ -37,11 +37,11 @@ class LocationUpdate(Base):
 class Database:
     def __init__(self):
         # Use a writable database path for Streamlit Cloud
-        try:
+        if 'STREAMLIT_SHARING' in os.environ:
             # For Streamlit Cloud, use a path in the /tmp directory which is writable
             self.database_url = "sqlite:////tmp/safetrack.db"
-        except:
-            # Fallback for local development
+        else:
+            # For local development
             self.database_url = "sqlite:///safetrack.db"
             
         self.engine = create_engine(self.database_url)
@@ -50,17 +50,10 @@ class Database:
     def init_db(self):
         try:
             Base.metadata.create_all(bind=self.engine)
+            st.success("✅ Database initialized successfully")
         except Exception as e:
             st.error(f"Database initialization error: {e}")
-            # Try with a different database path as fallback
-            try:
-                self.database_url = "sqlite:///safetrack.db"
-                self.engine = create_engine(self.database_url)
-                self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
-                Base.metadata.create_all(bind=self.engine)
-            except Exception as e2:
-                st.error(f"Fallback database also failed: {e2}")
-    
+
     def get_session(self):
         return self.SessionLocal()
 
