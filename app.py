@@ -481,10 +481,7 @@ def share_location(tracking_id):
             else:
                 st.error(f"Failed to share location: {result.get('error', 'Unknown error')}")
                 
-    except Exception as e:
-        st.error(f"Error getting location: {str(e)}")
 
-if __name__ == "__main__":
-    main()
+
 
 
