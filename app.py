@@ -92,10 +92,11 @@ def send_tracking_request(sender_phone, recipient_phone, custom_message):
             sender_phone=sender_phone,
             recipient_phone=recipient_phone,
             message=custom_message,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=24)  # Fixed here
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24)
         )
         session.add(tracking_session)
         session.commit()
+        session.refresh(tracking_session)
         
         # Send SMS
         sms_result = sms_service.send_tracking_request(
@@ -124,6 +125,7 @@ def send_tracking_request(sender_phone, recipient_phone, custom_message):
             
     except Exception as e:
         session.rollback()
+        st.error(f"Database error: {e}")
         return {'success': False, 'error': str(e)}
     finally:
         session.close()
@@ -475,4 +477,5 @@ def share_location(tracking_id):
         st.error(f"Error getting location: {str(e)}")
 
 if __name__ == "__main__":
+
     main()
