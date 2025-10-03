@@ -28,23 +28,22 @@ class SMSService:
             self.client = None
             st.warning("⚠️ Twilio not configured - SMS features disabled")
     
-    
-def send_tracking_request(self, recipient_phone, tracking_id, custom_message=None):
-    tracking_url = f"{self.server_url}/?tracking_id={tracking_id}"
-    
-    # Demo mode - show tracking URL instead of sending SMS
-    if not self.twilio_configured:
-        return {
-            'success': True,  # Change to True to continue without SMS
-            'sms_sent': False,
-            'tracking_url': tracking_url,
-            'message': 'DEMO MODE: Copy this URL to share manually',
-            'debug_info': {
-                'formatted_phone': recipient_phone,
-                'demo_mode': True
+    def send_tracking_request(self, recipient_phone, tracking_id, custom_message=None):
+        tracking_url = f"{self.server_url}/?tracking_id={tracking_id}"
+        
+        # Demo mode - show tracking URL instead of sending SMS
+        if not self.twilio_configured:
+            return {
+                'success': True,  # Change to True to continue without SMS
+                'sms_sent': False,
+                'tracking_url': tracking_url,
+                'message': 'DEMO MODE: Copy this URL to share manually',
+                'debug_info': {
+                    'formatted_phone': recipient_phone,
+                    'demo_mode': True
+                }
             }
-        }
-    
+        
         try:
             # Format phone number (remove spaces, ensure + format)
             recipient_phone = recipient_phone.strip().replace(' ', '')
@@ -73,6 +72,5 @@ def send_tracking_request(self, recipient_phone, tracking_id, custom_message=Non
                 'tracking_url': tracking_url,
                 'message': f'SMS failed: {str(e)}'
             }
-
 
 sms_service = SMSService()
