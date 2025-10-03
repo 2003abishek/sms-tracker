@@ -4,9 +4,7 @@ from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime, timezone, timedelta
 import uuid
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
+import streamlit as st
 
 Base = declarative_base()
 
@@ -38,12 +36,30 @@ class LocationUpdate(Base):
 
 class Database:
     def __init__(self):
-        self.database_url = os.getenv('DATABASE_URL', 'sqlite:///safetrack.db')
+        # Use a writable database path for Streamlit Cloud
+        try:
+            # For Streamlit Cloud, use a path in the /tmp directory which is writable
+            self.database_url = "sqlite:////tmp/safetrack.db"
+        except:
+            # Fallback for local development
+            self.database_url = "sqlite:///safetrack.db"
+            
         self.engine = create_engine(self.database_url)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         
     def init_db(self):
-        Base.metadata.create_all(bind=self.engine)
+        try:
+            Base.metadata.create_all(bind=self.engine)
+        except Exception as e:
+            st.error(f"Database initialization error: {e}")
+            # Try with a different database path as fallback
+            try:
+                self.database_url = "sqlite:///safetrack.db"
+                self.engine = create_engine(self.database_url)
+                self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+                Base.metadata.create_all(bind=self.engine)
+            except Exception as e2:
+                st.error(f"Fallback database also failed: {e2}")
     
     def get_session(self):
         return self.SessionLocal()
