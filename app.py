@@ -374,28 +374,73 @@ def show_share_location_page():
                         f"Lat: {loc.latitude:.6f}, Lng: {loc.longitude:.6f}")
 
 def share_location(tracking_id):
-    """Handle location sharing"""
-    try:
-        with st.spinner("Getting your location..."):
-            # For demo purposes, we'll simulate location
-            st.warning("""
-            **Note:** Streamlit doesn't have built-in geolocation in the main version yet.
-            
-            In a production app, you would:
-            1. Use JavaScript integration via components
-            2. Use a mobile-responsive web app
-            3. Integrate with native mobile capabilities
-            
-            For this demo, we'll simulate location data.
-            """)
-            
-            # Simulate location (in real app, get from browser geolocation API)
-            import random
-            simulated_lat = 40.7128 + random.uniform(-0.01, 0.01)  # Around NYC
-            simulated_lng = -74.0060 + random.uniform(-0.01, 0.01)
-            accuracy = random.uniform(5, 50)
-            
-            result = save_location(tracking_id, simulated_lat, simulated_lng, accuracy)
+    """Handle location sharing with manual input"""
+    st.subheader("📍 Share Your Location")
+    
+    st.info("""
+    **How to get your current location:**
+    1. Open Google Maps on your phone
+    2. Press and hold on your current location (blue dot)
+    3. Copy the coordinates that appear at the bottom
+    4. Paste them below
+    """)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        latitude = st.number_input("Latitude", 
+                                 min_value=-90.0, 
+                                 max_value=90.0, 
+                                 value=28.6139,  # Default to a common location
+                                 format="%.6f",
+                                 help="Example: 28.6139 for New Delhi")
+    with col2:
+        longitude = st.number_input("Longitude", 
+                                  min_value=-180.0, 
+                                  max_value=180.0, 
+                                  value=77.2090,  # Default to a common location
+                                  format="%.6f",
+                                  help="Example: 77.2090 for New Delhi")
+    
+    accuracy = st.slider("Approximate Accuracy (meters)", 10, 1000, 50,
+                        help="How accurate is your location? Lower is better")
+    
+    # Quick location buttons for common places
+    st.subheader("Quick Locations")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("📍 Delhi", use_container_width=True):
+            st.session_state.lat = 28.6139
+            st.session_state.lng = 77.2090
+            st.rerun()
+    
+    with col2:
+        if st.button("📍 Mumbai", use_container_width=True):
+            st.session_state.lat = 19.0760
+            st.session_state.lng = 72.8777
+            st.rerun()
+    
+    with col3:
+        if st.button("📍 Bangalore", use_container_width=True):
+            st.session_state.lat = 12.9716
+            st.session_state.lng = 77.5946
+            st.rerun()
+    
+    with col4:
+        if st.button("📍 Chennai", use_container_width=True):
+            st.session_state.lat = 13.0827
+            st.session_state.lng = 80.2707
+            st.rerun()
+    
+    # Apply quick location if set
+    if hasattr(st.session_state, 'lat'):
+        latitude = st.session_state.lat
+    if hasattr(st.session_state, 'lng'):
+        longitude = st.session_state.lng
+    
+    if st.button("📍 Share This Location", type="primary", use_container_width=True):
+        with st.spinner("Saving your location..."):
+            result = save_location(tracking_id, latitude, longitude, accuracy)
             
             if result['success']:
                 st.success("✅ Location shared successfully!")
@@ -405,19 +450,33 @@ def share_location(tracking_id):
                 import folium
                 from streamlit_folium import folium_static
                 
-                m = folium.Map(location=[simulated_lat, simulated_lng], zoom_start=15)
+                m = folium.Map(location=[latitude, longitude], zoom_start=15)
                 folium.Marker(
-                    [simulated_lat, simulated_lng],
+                    [latitude, longitude],
                     popup="Your shared location",
                     tooltip="Your location",
                     icon=folium.Icon(color='green')
                 ).add_to(m)
                 
+                # Add accuracy circle
+                folium.Circle(
+                    location=[latitude, longitude],
+                    radius=accuracy,
+                    color='blue',
+                    fill=True,
+                    fillOpacity=0.2,
+                    popup=f"Accuracy: ~{accuracy}m"
+                ).add_to(m)
+                
                 folium_static(m, width=600, height=400)
                 
-                st.write(f"**Latitude:** {simulated_lat:.6f}")
-                st.write(f"**Longitude:** {simulated_lng:.6f}")
-                st.write(f"**Accuracy:** ~{accuracy:.0f} meters")
+                st.write(f"**Latitude:** {latitude:.6f}")
+                st.write(f"**Longitude:** {longitude:.6f}")
+                st.write(f"**Accuracy:** ~{accuracy} meters")
+                st.write(f"**Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                
+                # Show success message
+                st.info("✅ Your location has been shared with the person who requested it!")
                 
             else:
                 st.error(f"Failed to share location: {result.get('error', 'Unknown error')}")
@@ -427,3 +486,4 @@ def share_location(tracking_id):
 
 if __name__ == "__main__":
     main()
+
