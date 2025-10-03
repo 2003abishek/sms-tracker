@@ -6,7 +6,7 @@ from streamlit_folium import folium_static
 from database import db, TrackingSession, LocationUpdate
 from sms_service import sms_service
 import time
-
+import os
 # Page configuration
 st.set_page_config(
     page_title="SafeTrack - Location Tracking",
@@ -486,4 +486,5 @@ def share_location(tracking_id):
 
 if __name__ == "__main__":
     main()
+
 
