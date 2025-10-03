@@ -12,7 +12,7 @@ class TrackingSession(Base):
     __tablename__ = 'tracking_sessions'
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    sender_phone = Column(String(20), nullable=True)  # Changed to nullable
+    sender_phone = Column(String(20), nullable=True)
     recipient_phone = Column(String(20), nullable=False)
     message = Column(Text, nullable=True)
     status = Column(String(20), default='pending')
@@ -36,12 +36,10 @@ class LocationUpdate(Base):
 
 class Database:
     def __init__(self):
-        # Use a writable database path for Streamlit Cloud
-        if 'STREAMLIT_SHARING' in os.environ:
-            # For Streamlit Cloud, use a path in the /tmp directory which is writable
+        # For Streamlit Cloud, use /tmp directory which is writable
+        if os.path.exists('/tmp'):
             self.database_url = "sqlite:////tmp/safetrack.db"
         else:
-            # For local development
             self.database_url = "sqlite:///safetrack.db"
             
         self.engine = create_engine(self.database_url)
@@ -50,13 +48,13 @@ class Database:
     def init_db(self):
         try:
             Base.metadata.create_all(bind=self.engine)
-            st.success("✅ Database initialized successfully")
+            # Don't show success message here to avoid clutter
         except Exception as e:
             st.error(f"Database initialization error: {e}")
 
     def get_session(self):
         return self.SessionLocal()
 
-# Initialize database
+# Initialize database quietly
 db = Database()
 db.init_db()
