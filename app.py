@@ -7,6 +7,7 @@ from database import db, TrackingSession, LocationUpdate
 from sms_service import sms_service
 import time
 import os
+
 # Page configuration
 st.set_page_config(
     page_title="SafeTrack - Location Tracking",
@@ -19,6 +20,35 @@ if 'current_tracking_id' not in st.session_state:
     st.session_state.current_tracking_id = None
 if 'tracking_sessions' not in st.session_state:
     st.session_state.tracking_sessions = []
+if 'lat' not in st.session_state:
+    st.session_state.lat = 28.6139
+if 'lng' not in st.session_state:
+    st.session_state.lng = 77.2090
+
+def debug_database():
+    """Debug function to check database status"""
+    session = db.get_session()
+    try:
+        session_count = session.query(TrackingSession).count()
+        location_count = session.query(LocationUpdate).count()
+        
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("🔧 Debug Info")
+        st.sidebar.write(f"Tracking Sessions: {session_count}")
+        st.sidebar.write(f"Location Updates: {location_count}")
+        
+        # Show recent sessions
+        recent_sessions = session.query(TrackingSession).order_by(TrackingSession.created_at.desc()).limit(5).all()
+        if recent_sessions:
+            st.sidebar.write("Recent Sessions:")
+            for s in recent_sessions:
+                locations_count = len(s.locations)
+                st.sidebar.write(f"- {s.id[:8]}... ({s.status}) - {locations_count} locs")
+                
+    except Exception as e:
+        st.sidebar.error(f"Debug error: {e}")
+    finally:
+        session.close()
 
 def init_session_state():
     """Initialize session state with database data"""
@@ -26,6 +56,8 @@ def init_session_state():
     try:
         tracking_sessions = session.query(TrackingSession).order_by(TrackingSession.created_at.desc()).all()
         st.session_state.tracking_sessions = tracking_sessions
+    except Exception as e:
+        st.error(f"Error loading sessions: {e}")
     finally:
         session.close()
 
@@ -80,20 +112,32 @@ def send_tracking_request(sender_phone, recipient_phone, custom_message):
 
 def get_tracking_session(tracking_id):
     """Get tracking session by ID"""
+    if not tracking_id:
+        return None
+        
     session = db.get_session()
     try:
         return session.query(TrackingSession).filter(TrackingSession.id == tracking_id).first()
+    except Exception as e:
+        st.error(f"Error getting session: {e}")
+        return None
     finally:
         session.close()
 
 def get_locations(tracking_id):
     """Get all locations for a tracking session"""
+    if not tracking_id:
+        return []
+        
     session = db.get_session()
     try:
         locations = session.query(LocationUpdate).filter(
             LocationUpdate.session_id == tracking_id
         ).order_by(LocationUpdate.timestamp.asc()).all()
         return locations
+    except Exception as e:
+        st.error(f"Error getting locations: {e}")
+        return []
     finally:
         session.close()
 
@@ -118,6 +162,9 @@ def save_location(tracking_id, latitude, longitude, accuracy=None):
         )
         session.add(location_update)
         session.commit()
+        
+        # Refresh the session state
+        init_session_state()
         
         return {'success': True}
         
@@ -161,7 +208,7 @@ def main():
     
     page = st.sidebar.radio("Go to", ["Send Tracking Request", "View Tracking Sessions", "Share Location"])
     
-    # Check for tracking ID in URL parameters - UPDATED: st.query_params instead of st.experimental_get_query_params
+    # Check for tracking ID in URL parameters
     query_params = st.query_params
     tracking_id_from_url = query_params.get("tracking_id", [None])[0]
     
@@ -173,6 +220,9 @@ def main():
     
     # Initialize session state
     init_session_state()
+    
+    # Add debug information
+    debug_database()
     
     if page == "Send Tracking Request":
         show_send_request_page()
@@ -254,6 +304,10 @@ def show_tracking_sessions_page():
     session_options = {f"{s.id[:8]}... - {s.recipient_phone} - {s.created_at.strftime('%Y-%m-%d %H:%M')}": s.id 
                       for s in st.session_state.tracking_sessions}
     
+    if not session_options:
+        st.info("No tracking sessions available.")
+        return
+    
     selected_session_label = st.selectbox(
         "Select Tracking Session",
         options=list(session_options.keys()),
@@ -266,13 +320,18 @@ def show_tracking_sessions_page():
     
     if tracking_session:
         # Session info
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Recipient", tracking_session.recipient_phone)
         with col2:
-            st.metric("Status", tracking_session.status)
+            status_color = "🟢" if tracking_session.status == 'active' else "🟡" if tracking_session.status == 'pending' else "🔴"
+            st.metric("Status", f"{status_color} {tracking_session.status}")
         with col3:
             st.metric("Locations Received", len(locations))
+        with col4:
+            expires_in = (tracking_session.expires_at - datetime.now(timezone.utc))
+            hours_left = max(0, int(expires_in.total_seconds() / 3600))
+            st.metric("Hours Left", hours_left)
         
         # Map and locations
         if locations:
@@ -310,12 +369,12 @@ def show_tracking_sessions_page():
             
             # Show tracking URL for sharing
             tracking_url = f"{sms_service.server_url}?tracking_id={tracking_id}"
-            st.text_input("Share this URL with recipient:", tracking_url)
+            st.text_input("Share this URL with recipient:", tracking_url, key=f"url_{tracking_id}")
 
 def show_share_location_page():
     st.title("📍 Share Your Location")
     
-    # Get tracking ID from URL or manual input - UPDATED: st.query_params instead of st.experimental_get_query_params
+    # Get tracking ID from URL or manual input
     tracking_id = None
     
     # Check if tracking ID came from URL
@@ -328,7 +387,7 @@ def show_share_location_page():
         tracking_id_from_url = query_params.get("tracking_id", [None])[0]
         if tracking_id_from_url:
             tracking_id = tracking_id_from_url
-            st.success(f"Tracking session detected: {tracking_id[:8]}...")
+            st.success(f"Tracking session detected: {tracking_id_from_url[:8]}...")
     
     # Manual tracking ID input
     if not tracking_id:
@@ -338,34 +397,35 @@ def show_share_location_page():
         # Verify tracking session exists
         tracking_session = get_tracking_session(tracking_id)
         if not tracking_session:
-            st.error("Invalid tracking ID. Please check and try again.")
+            st.error("❌ Invalid tracking ID. Please check and try again.")
+            st.info("Make sure you're using the correct Tracking ID from the SMS or URL.")
             return
         
-        if tracking_session.status == 'expired':
-            st.error("This tracking link has expired.")
+        # Check if expired
+        if tracking_session.expires_at and tracking_session.expires_at < datetime.now(timezone.utc):
+            tracking_session.status = 'expired'
+            session = db.get_session()
+            try:
+                session.commit()
+            finally:
+                session.close()
+            st.error("❌ This tracking link has expired.")
             return
         
-        st.info(f"**Recipient:** {tracking_session.recipient_phone}")
+        st.success(f"✅ Tracking session found for: {tracking_session.recipient_phone}")
+        
         if tracking_session.message:
             st.info(f"**Message:** {tracking_session.message}")
         
         st.markdown("---")
-        st.subheader("Share Your Current Location")
         
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            if st.button("📍 Share My Current Location", type="primary", use_container_width=True):
-                share_location(tracking_id)
-        
-        with col2:
-            if st.button("🚫 Don't Share", use_container_width=True):
-                st.info("Location sharing cancelled.")
+        # Use the improved share_location function
+        share_location_manual(tracking_id)
         
         # Show previous locations if any
         existing_locations = get_locations(tracking_id)
         if existing_locations:
-            st.subheader("Your Shared Locations")
+            st.subheader("Your Previously Shared Locations")
             map_obj = create_map(existing_locations)
             folium_static(map_obj, width=700, height=300)
             
@@ -373,14 +433,14 @@ def show_share_location_page():
                 st.write(f"**Location {i}:** {loc.timestamp.strftime('%H:%M:%S')} - "
                         f"Lat: {loc.latitude:.6f}, Lng: {loc.longitude:.6f}")
 
-def share_location(tracking_id):
-    """Handle location sharing with manual input"""
-    st.subheader("📍 Share Your Location")
+def share_location_manual(tracking_id):
+    """Improved manual location sharing with better UI"""
+    st.subheader("📍 Enter Your Location Coordinates")
     
     st.info("""
-    **How to get your current location:**
-    1. Open Google Maps on your phone
-    2. Press and hold on your current location (blue dot)
+    **How to get your coordinates:**
+    1. Open **Google Maps** on your phone
+    2. Press and hold on your **current location** (blue dot)
     3. Copy the coordinates that appear at the bottom
     4. Paste them below
     """)
@@ -390,22 +450,22 @@ def share_location(tracking_id):
         latitude = st.number_input("Latitude", 
                                  min_value=-90.0, 
                                  max_value=90.0, 
-                                 value=28.6139,  # Default to a common location
+                                 value=st.session_state.lat,
                                  format="%.6f",
-                                 help="Example: 28.6139 for New Delhi")
+                                 key="latitude_input")
     with col2:
         longitude = st.number_input("Longitude", 
                                   min_value=-180.0, 
                                   max_value=180.0, 
-                                  value=77.2090,  # Default to a common location
+                                  value=st.session_state.lng,
                                   format="%.6f",
-                                  help="Example: 77.2090 for New Delhi")
+                                  key="longitude_input")
     
-    accuracy = st.slider("Approximate Accuracy (meters)", 10, 1000, 50,
+    accuracy = st.slider("Approximate Accuracy (meters)", 10, 500, 50,
                         help="How accurate is your location? Lower is better")
     
     # Quick location buttons for common places
-    st.subheader("Quick Locations")
+    st.subheader("Quick Locations (India)")
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -432,13 +492,8 @@ def share_location(tracking_id):
             st.session_state.lng = 80.2707
             st.rerun()
     
-    # Apply quick location if set
-    if hasattr(st.session_state, 'lat'):
-        latitude = st.session_state.lat
-    if hasattr(st.session_state, 'lng'):
-        longitude = st.session_state.lng
-    
-    if st.button("📍 Share This Location", type="primary", use_container_width=True):
+    # Share location button
+    if st.button("📍 Share My Location", type="primary", use_container_width=True):
         with st.spinner("Saving your location..."):
             result = save_location(tracking_id, latitude, longitude, accuracy)
             
@@ -447,9 +502,6 @@ def share_location(tracking_id):
                 st.balloons()
                 
                 # Show the shared location on a map
-                import folium
-                from streamlit_folium import folium_static
-                
                 m = folium.Map(location=[latitude, longitude], zoom_start=15)
                 folium.Marker(
                     [latitude, longitude],
@@ -470,18 +522,16 @@ def share_location(tracking_id):
                 
                 folium_static(m, width=600, height=400)
                 
-                st.write(f"**Latitude:** {latitude:.6f}")
-                st.write(f"**Longitude:** {longitude:.6f}")
+                # Show location details
+                st.write(f"**Coordinates:** {latitude:.6f}, {longitude:.6f}")
                 st.write(f"**Accuracy:** ~{accuracy} meters")
-                st.write(f"**Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                st.write(f"**Time Shared:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 
                 # Show success message
                 st.info("✅ Your location has been shared with the person who requested it!")
                 
             else:
-                st.error(f"Failed to share location: {result.get('error', 'Unknown error')}")
-                
+                st.error(f"❌ Failed to share location: {result.get('error', 'Unknown error')}")
 
-
-
-
+if __name__ == "__main__":
+    main()
