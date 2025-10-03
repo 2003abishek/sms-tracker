@@ -7,73 +7,18 @@ from database import db, TrackingSession, LocationUpdate
 from sms_service import sms_service
 import time
 
-def main():
-    # Sidebar
-    st.sidebar.title("📍 SafeTrack")
-    st.sidebar.markdown("### Navigation")
-    
-    page = st.sidebar.radio("Go to", ["Send Tracking Request", "View Tracking Sessions", "Share Location"])
-    
-    # Check for tracking ID in URL parameters (updated method)
-    try:
-        # For newer Streamlit versions
-        query_params = st.query_params
-        tracking_id_from_url = query_params.get('tracking_id', [None])[0]
-    except:
-        # Fallback for older versions
-        try:
-            query_params = st.experimental_get_query_params()
-            tracking_id_from_url = query_params.get('tracking_id', [None])[0]
-        except:
-            tracking_id_from_url = None
-    
-    if tracking_id_from_url and page != "Share Location":
-        st.sidebar.info(f"Tracking session detected: {tracking_id_from_url[:8]}...")
-        if st.sidebar.button("Go to Share Location"):
-            page = "Share Location"
-            st.session_state.share_tracking_id = tracking_id_from_url
-    
-    # Initialize session state
-    init_session_state()
-    
-    if page == "Send Tracking Request":
-        show_send_request_page()
-    elif page == "View Tracking Sessions":
-        show_tracking_sessions_page()
-    elif page == "Share Location":
-        show_share_location_page()
+# Page configuration
+st.set_page_config(
+    page_title="SafeTrack - Location Tracking",
+    page_icon="📍",
+    layout="wide"
+)
 
-def show_share_location_page():
-    st.title("📍 Share Your Location")
-    
-    # Get tracking ID from URL or manual input
-    tracking_id = None
-    
-    # Check if tracking ID came from URL
-    if 'share_tracking_id' in st.session_state:
-        tracking_id = st.session_state.share_tracking_id
-        st.success(f"Tracking session detected: {tracking_id[:8]}...")
-    else:
-        # Updated query params method
-        try:
-            query_params = st.query_params
-            tracking_id_from_url = query_params.get('tracking_id', [None])[0]
-        except:
-            try:
-                query_params = st.experimental_get_query_params()
-                tracking_id_from_url = query_params.get('tracking_id', [None])[0]
-            except:
-                tracking_id_from_url = None
-        
-        if tracking_id_from_url:
-            tracking_id = tracking_id_from_url
-            st.success(f"Tracking session detected: {tracking_id[:8]}...")
-    
-    # Manual tracking ID input
-    if not tracking_id:
-        tracking_id = st.text_input("Enter Tracking ID", placeholder="Paste the tracking ID from your SMS")
-    
-    # ... rest of the function remains the same
+# Initialize session state
+if 'current_tracking_id' not in st.session_state:
+    st.session_state.current_tracking_id = None
+if 'tracking_sessions' not in st.session_state:
+    st.session_state.tracking_sessions = []
 
 def init_session_state():
     """Initialize session state with database data"""
@@ -83,6 +28,7 @@ def init_session_state():
         st.session_state.tracking_sessions = tracking_sessions
     finally:
         session.close()
+
 def send_tracking_request(sender_phone, recipient_phone, custom_message):
     """Send tracking request via SMS"""
     session = db.get_session()
@@ -105,27 +51,29 @@ def send_tracking_request(sender_phone, recipient_phone, custom_message):
             custom_message
         )
         
-        if sms_result['success']:
-            st.session_state.current_tracking_id = tracking_session.id
-            init_session_state()  # Refresh session list
-            return {
-                'success': True,
-                'tracking_id': tracking_session.id,
-                'tracking_url': sms_result.get('tracking_url', '')
+        # Always return tracking session, but indicate SMS status
+        result = {
+            'success': True,
+            'tracking_id': tracking_session.id,
+            'tracking_url': sms_result.get('tracking_url', ''),
+            'sms_sent': sms_result.get('success', False),
+            'sms_message': sms_result.get('message', 'Unknown status'),
+            'debug_info': {
+                'formatted_phone': sms_result.get('formatted_phone'),
+                'error': sms_result.get('error')
             }
-        else:
-            # Still return success for database entry, but show SMS warning
-            return {
-                'success': True,
-                'tracking_id': tracking_session.id,
-                'sms_sent': False,
-                'error': sms_result.get('error', 'Unknown error'),
-                'debug_url': sms_result.get('debug_url', '')
-            }
+        }
+        
+        if not sms_result['success']:
+            result['sms_error'] = sms_result.get('error', 'Unknown error')
+            result['help_url'] = sms_result.get('help_url')
+            
+        st.session_state.current_tracking_id = tracking_session.id
+        init_session_state()
+        return result
             
     except Exception as e:
         session.rollback()
-        st.error(f"Database error: {e}")
         return {'success': False, 'error': str(e)}
     finally:
         session.close()
@@ -213,9 +161,9 @@ def main():
     
     page = st.sidebar.radio("Go to", ["Send Tracking Request", "View Tracking Sessions", "Share Location"])
     
-    # Check for tracking ID in URL parameters
-    query_params = st.experimental_get_query_params()
-    tracking_id_from_url = query_params.get('tracking_id', [None])[0]
+    # Check for tracking ID in URL parameters - UPDATED: st.query_params instead of st.experimental_get_query_params
+    query_params = st.query_params
+    tracking_id_from_url = query_params.get("tracking_id", [None])[0]
     
     if tracking_id_from_url and page != "Share Location":
         st.sidebar.info(f"Tracking session detected: {tracking_id_from_url[:8]}...")
@@ -266,19 +214,19 @@ def show_send_request_page():
                 result = send_tracking_request(sender_phone, recipient_phone, custom_message)
                 
                 if result['success']:
-                    st.success("✅ Tracking request sent successfully!")
+                    st.success("✅ Tracking request created successfully!")
                     
                     col1, col2 = st.columns(2)
                     with col1:
                         st.info(f"**Tracking ID:** {result['tracking_id']}")
                     
                     with col2:
-                        if result.get('sms_sent', True):
+                        if result.get('sms_sent'):
                             st.info("📱 SMS sent to recipient")
                         else:
-                            st.warning("⚠️ SMS not sent (Twilio not configured)")
-                            if result.get('debug_url'):
-                                st.code(result['debug_url'])
+                            st.warning("⚠️ SMS not sent - Twilio not configured")
+                            if result.get('sms_error'):
+                                st.error(f"SMS Error: {result['sms_error']}")
                     
                     # Show quick actions
                     st.markdown("### Next Steps")
@@ -287,6 +235,10 @@ def show_send_request_page():
                     - **Share this session:** Tracking ID: `{result['tracking_id']}`
                     - **Wait for location updates:** The recipient will share their location via the link
                     """)
+                    
+                    # Show debug info if available
+                    if result.get('debug_info', {}).get('formatted_phone'):
+                        st.info(f"**Formatted phone:** {result['debug_info']['formatted_phone']}")
                     
                 else:
                     st.error(f"Failed to send tracking request: {result.get('error', 'Unknown error')}")
@@ -357,13 +309,13 @@ def show_tracking_sessions_page():
             st.info("No locations received yet. Waiting for recipient to share their location.")
             
             # Show tracking URL for sharing
-            tracking_url = f"{sms_service.server_url}/?tracking_id={tracking_id}"
+            tracking_url = f"{sms_service.server_url}?tracking_id={tracking_id}"
             st.text_input("Share this URL with recipient:", tracking_url)
 
 def show_share_location_page():
     st.title("📍 Share Your Location")
     
-    # Get tracking ID from URL or manual input
+    # Get tracking ID from URL or manual input - UPDATED: st.query_params instead of st.experimental_get_query_params
     tracking_id = None
     
     # Check if tracking ID came from URL
@@ -371,8 +323,9 @@ def show_share_location_page():
         tracking_id = st.session_state.share_tracking_id
         st.success(f"Tracking session detected: {tracking_id[:8]}...")
     else:
-        query_params = st.experimental_get_query_params()
-        tracking_id_from_url = query_params.get('tracking_id', [None])[0]
+        # Use new query_params API
+        query_params = st.query_params
+        tracking_id_from_url = query_params.get("tracking_id", [None])[0]
         if tracking_id_from_url:
             tracking_id = tracking_id_from_url
             st.success(f"Tracking session detected: {tracking_id[:8]}...")
@@ -421,14 +374,10 @@ def show_share_location_page():
                         f"Lat: {loc.latitude:.6f}, Lng: {loc.longitude:.6f}")
 
 def share_location(tracking_id):
-    """Handle location sharing using Streamlit's experimental feature"""
+    """Handle location sharing"""
     try:
-        # Use Streamlit's experimental geolocation feature
         with st.spinner("Getting your location..."):
-            # This is a simplified version - in a real app, you might use JavaScript integration
-            # or a dedicated location sharing service
-            
-            # For demo purposes, we'll simulate location or use a fallback
+            # For demo purposes, we'll simulate location
             st.warning("""
             **Note:** Streamlit doesn't have built-in geolocation in the main version yet.
             
@@ -477,5 +426,4 @@ def share_location(tracking_id):
         st.error(f"Error getting location: {str(e)}")
 
 if __name__ == "__main__":
-
     main()
